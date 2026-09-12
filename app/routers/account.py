@@ -1,6 +1,7 @@
 import secrets
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from app.auth import SESSION_COOKIE, SESSION_MAX_AGE, admin, cookie_is_secure, create_session, credentials_for, verify_password
+from app.auth import (SESSION_COOKIE, SESSION_MAX_AGE, admin, cookie_is_secure, create_session, credentials_for,
+                       rotate_session_generation, verify_password)
 from app.schemas import PasswordChange
 
 router = APIRouter(prefix='/api/account', dependencies=[Depends(admin)])
@@ -22,6 +23,9 @@ async def change_password(body: PasswordChange, request: Request, response: Resp
     if not await verify_password(request, username, body.current_password):
         raise HTTPException(401, 'Current password is incorrect')
     await request.app.state.db.update_json('admin_account', password=body.new_password)
+    # Bump the session generation so every previously issued session is revoked for good,
+    # even one whose fingerprint happens to match again if the password is changed back later.
+    await rotate_session_generation(request)
     # credentials_for() cached the old password on this request; refresh it so create_session()
     # below signs the new cookie with the new password, keeping the current session alive
     # instead of logging this browser out (password rotation invalidates every other session).

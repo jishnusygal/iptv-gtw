@@ -295,6 +295,29 @@ def test_account_password_change_and_token_regeneration(tmp_path):
         assert client.get('/playlist.m3u', params={'token': new_token}).status_code == 200
 
 
+def test_stolen_session_stays_revoked_after_password_reverted(tmp_path):
+    # Regression test: a session's validity used to depend only on matching the *current*
+    # password's fingerprint, so changing A -> B -> back to A made a session stolen under the
+    # original A valid again. A session generation counter, bumped on every password change,
+    # must keep it revoked regardless of whether the password value is reused later.
+    unconfigured = Settings(_env_file=None, database_url=f'sqlite+aiosqlite:///{tmp_path}/replay.db',
+                             scheduler_enabled=False, sync_on_start=False)
+    with TestClient(create_app(unconfigured)) as client:
+        client.post('/setup', json={'username': 'admin', 'password': 'password-one-123', 'confirm': 'password-one-123'})
+        headers = {'X-Pilot-Request': '1'}
+        stolen_session = client.cookies.get('session')
+
+        change = {'current_password': 'password-one-123', 'new_password': 'password-two-456', 'confirm': 'password-two-456'}
+        assert client.post('/api/account/password', json=change, headers=headers).status_code == 200
+        revert = {'current_password': 'password-two-456', 'new_password': 'password-one-123', 'confirm': 'password-one-123'}
+        assert client.post('/api/account/password', json=revert, headers=headers).status_code == 200
+
+        # The password is back to its original value, but the stolen cookie must stay dead.
+        stale = TestClient(client.app)
+        stale.cookies.set('session', stolen_session)
+        assert stale.get('/api/status').status_code == 401
+
+
 async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch):
     import json as jsonlib
     from app.services import jellyfin_service

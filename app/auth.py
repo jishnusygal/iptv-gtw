@@ -74,15 +74,34 @@ def _fingerprint(password):
     return hashlib.sha256(password.encode()).hexdigest()[:16]
 
 
-def _sign(secret, issued_at, fingerprint):
-    return hmac.new(secret.encode(), f'{issued_at}.{fingerprint}'.encode(), hashlib.sha256).hexdigest()
+async def _session_generation(request):
+    # Bumped by rotate_session_generation() on every explicit password change, independent
+    # of the fingerprint above: without this, changing the password from A to B and back to
+    # A would make a session issued under the original A valid again (same fingerprint),
+    # even though the admin's intent when changing to B was to revoke every prior session.
+    if not hasattr(request.app.state, 'session_generation'):
+        stored = await request.app.state.db.read_json('security')
+        request.app.state.session_generation = stored.get('session_generation', 0)
+    return request.app.state.session_generation
+
+
+async def rotate_session_generation(request):
+    generation = await _session_generation(request) + 1
+    await request.app.state.db.update_json('security', session_generation=generation)
+    request.app.state.session_generation = generation
+    return generation
+
+
+def _sign(secret, issued_at, fingerprint, generation):
+    return hmac.new(secret.encode(), f'{issued_at}.{fingerprint}.{generation}'.encode(), hashlib.sha256).hexdigest()
 
 
 async def create_session(request):
     secret = await _session_secret(request)
+    generation = await _session_generation(request)
     _, password, _ = await credentials_for(request)
     issued_at = int(time.time())
-    return f'{issued_at}.{_sign(secret, issued_at, _fingerprint(password))}'
+    return f'{issued_at}.{_sign(secret, issued_at, _fingerprint(password), generation)}'
 
 
 async def _session_valid(request):
@@ -97,7 +116,8 @@ async def _session_valid(request):
     if password is None:
         return False
     secret = await _session_secret(request)
-    return secrets.compare_digest(signature, _sign(secret, issued_at, _fingerprint(password)))
+    generation = await _session_generation(request)
+    return secrets.compare_digest(signature, _sign(secret, issued_at, _fingerprint(password), generation))
 
 
 async def require_ready(request: Request):
