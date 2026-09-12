@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import socket
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from app.auth import admin
@@ -8,12 +10,30 @@ from app.services import jellyfin_service
 log = logging.getLogger(__name__)
 router = APIRouter(prefix='/api/jellyfin', dependencies=[Depends(admin)])
 
+INTERNAL_PORT = 8000  # baked into the Dockerfile's CMD; this container always listens here
+
+
+async def _guess_jellyfin_url():
+    # Most compose stacks that pair this app with Jellyfin name its service "jellyfin";
+    # if that hostname actually resolves on this container's network, it's almost
+    # certainly the right one, so offer it as an editable starting point rather than
+    # making the admin type a value that's usually the same anyway.
+    try:
+        await asyncio.get_running_loop().getaddrinfo('jellyfin', 8096, type=socket.SOCK_STREAM)
+    except OSError:
+        return None
+    return 'http://jellyfin:8096'
+
 
 @router.get('')
 async def status(request: Request):
     config = await jellyfin_service.read_config(request.app.state.db)
-    return {'url': config.get('url'), 'base_url': config.get('base_url'), 'api_key_set': bool(config.get('api_key')),
-            'auto_sync': config.get('auto_sync', False), 'last_push': config.get('last_push'), 'last_error': config.get('last_error') or None}
+    detected_url = await _guess_jellyfin_url()
+    detected_base_url = f'http://{socket.gethostname()}:{INTERNAL_PORT}'
+    return {'url': config.get('url') or detected_url, 'url_detected': not config.get('url') and bool(detected_url),
+            'base_url': config.get('base_url') or detected_base_url, 'base_url_detected': not config.get('base_url'),
+            'api_key_set': bool(config.get('api_key')), 'auto_sync': config.get('auto_sync', False),
+            'last_push': config.get('last_push'), 'last_error': config.get('last_error') or None}
 
 
 @router.post('')

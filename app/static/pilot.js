@@ -1,8 +1,8 @@
 document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
-  stats: {}, channels: [], total: 0, page: 1, query: '', filter: '', country: '', language: [], group: '',
+  stats: {}, channels: [], total: 0, page: 1, query: '', filter: '', country: '', language: [], group: '', languageSearch: '',
   filterOptions: { countries: [], languages: [], groups: [] }, message: '', error: '',
   editing: null, draft: {}, saving: false, editError: '', sequence: 0, timer: null,
-  jellyfin: { url: '', apiKey: '', apiKeySet: false, baseUrl: window.location.origin, autoSync: false, lastPush: null, error: null, saving: false, pushing: false },
+  jellyfin: { url: '', urlDetected: false, apiKey: '', apiKeySet: false, baseUrl: '', baseUrlDetected: false, autoSync: false, lastPush: null, error: null, saving: false, pushing: false },
   async init() {
     this.loadFilterOptions();
     this.loadJellyfin();
@@ -33,6 +33,10 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
     const i = this.language.indexOf(l);
     if (i === -1) this.language.push(l); else this.language.splice(i, 1);
     this.page = 1; this.load();
+  },
+  filteredLanguages() {
+    const q = this.languageSearch.trim().toLowerCase();
+    return q ? this.filterOptions.languages.filter(l => l.toLowerCase().includes(q)) : this.filterOptions.languages;
   },
   async load() {
     const seq = ++this.sequence;
@@ -77,8 +81,8 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
   async loadJellyfin() {
     try {
       const data = await this.request('/api/jellyfin');
-      this.jellyfin = { ...this.jellyfin, url: data.url || '', apiKey: '', apiKeySet: data.api_key_set,
-        baseUrl: data.base_url || window.location.origin, autoSync: data.auto_sync, lastPush: data.last_push, error: data.last_error };
+      this.jellyfin = { ...this.jellyfin, url: data.url || '', urlDetected: data.url_detected, apiKey: '', apiKeySet: data.api_key_set,
+        baseUrl: data.base_url || '', baseUrlDetected: data.base_url_detected, autoSync: data.auto_sync, lastPush: data.last_push, error: data.last_error };
     } catch (e) { this.jellyfin.error = e.message; }
   },
   async saveJellyfin() {

@@ -285,6 +285,23 @@ async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch)
         assert not pushed
 
 
+def test_jellyfin_url_defaults_detected_and_editable(settings):
+    with TestClient(create_app(settings)) as client:
+        login(client, settings.admin_password.get_secret_value())
+        status = client.get('/api/jellyfin').json()
+        assert status['url'] is None and status['url_detected'] is False  # "jellyfin" doesn't resolve in tests
+        assert status['base_url'].startswith('http://') and status['base_url'].endswith(':8000')
+        assert status['base_url_detected'] is True
+
+        headers = {'X-Pilot-Request': '1'}
+        body = {'url': 'http://jellyfin:8096', 'api_key': 'key-1', 'base_url': 'http://my-custom-host:8000', 'auto_sync': False}
+        with_transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+        client.app.state.client._transport = with_transport
+        assert client.post('/api/jellyfin', json=body, headers=headers).status_code == 200
+        status = client.get('/api/jellyfin').json()
+        assert status['base_url'] == 'http://my-custom-host:8000' and status['base_url_detected'] is False
+
+
 def test_multi_language_filter(settings):
     with TestClient(create_app(settings)) as client:
         async def seed_languages(db):
