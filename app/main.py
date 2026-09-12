@@ -8,7 +8,7 @@ from sqlalchemy import func, select, text
 from app.config import Settings
 from app.database import Database
 from app.models import Channel
-from app.routers import api, export, jellyfin, login, profiles, setup, web
+from app.routers import account, api, export, jellyfin, login, profiles, setup, web
 from app.services.export_service import GuideCache
 from app.services.jobs import Jobs
 
@@ -47,6 +47,7 @@ def create_app(settings=None):
                 await db.engine.dispose()
 
     app = FastAPI(title='IPTV-Org Pilot', lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.include_router(account.router)
     app.include_router(api.router)
     app.include_router(export.router)
     app.include_router(export.profile_router)

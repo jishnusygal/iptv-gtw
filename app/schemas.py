@@ -54,6 +54,20 @@ class SetupRequest(BaseModel):
         return value
 
 
+class PasswordChange(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=12, max_length=200)
+    confirm: str = Field(min_length=1, max_length=200)
+
+    @field_validator('confirm')
+    @classmethod
+    def match(cls, value, info):
+        if value != info.data.get('new_password'):
+            raise ValueError('Passwords do not match')
+        return value
+
+
 class ProfileWrite(BaseModel):
     model_config = ConfigDict(extra='forbid')
     name: str = Field(min_length=1, max_length=100)
