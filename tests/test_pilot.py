@@ -29,6 +29,10 @@ async def db(settings):
     await database.engine.dispose()
 
 
+def login(client, password, username='admin'):
+    assert client.post('/login', json={'username': username, 'password': password}).status_code == 200
+
+
 async def seed(db):
     async with db.sessions.begin() as session:
         c = Channel(channel_number=1, name='News "One"\nInjected', tvg_id='News.us', epg_id='guide.news', group_title='News')
@@ -134,7 +138,7 @@ def test_api_auth_edit_validation_exports(settings):
         assert client.get('/healthz').status_code == 200
         assert client.get('/api/status').status_code == 401
         assert client.get('/playlist.m3u').status_code == 401
-        client.auth = ('admin', settings.admin_password.get_secret_value())
+        login(client, settings.admin_password.get_secret_value())
         assert client.get('/').status_code == 200
         assert client.get('/api/channels').json()['total'] == 0
         assert client.patch('/api/channels/1', json={'name': 'New'}).status_code == 403
@@ -177,10 +181,114 @@ async def test_epg_rejects_entities(settings, monkeypatch):
         await GuideCache().get(None, settings)
 
 
+def test_setup_wizard_creates_admin(tmp_path):
+    unconfigured = Settings(_env_file=None, database_url=f'sqlite+aiosqlite:///{tmp_path}/setup.db',
+                             scheduler_enabled=False, sync_on_start=False)
+    with TestClient(create_app(unconfigured)) as client:
+        assert client.get('/', follow_redirects=False).headers['location'] == '/setup'
+        assert client.get('/setup').status_code == 200
+        assert client.get('/login', follow_redirects=False).headers['location'] == '/setup'
+        assert client.get('/playlist.m3u').status_code == 503
+        assert client.get('/api/status').status_code == 503
+        assert client.post('/setup', json={'username': 'admin', 'password': 'short', 'confirm': 'short'}).status_code == 422
+        assert client.post('/setup', json={'username': 'admin', 'password': 'longenoughpassword', 'confirm': 'nope'}).status_code == 422
+        assert client.post('/setup', json={'username': 'admin', 'password': 'longenoughpassword', 'confirm': 'longenoughpassword'}).status_code == 200
+
+        # The wizard signs the new admin straight in; no separate login step needed.
+        assert client.get('/').status_code == 200
+        assert 'token=' in client.get('/').text
+        assert client.post('/setup', json={'username': 'admin', 'password': 'longenoughpassword', 'confirm': 'longenoughpassword'}).status_code == 409
+        assert client.get('/setup', follow_redirects=False).status_code == 307
+
+        # Signing out drops the session; a real login page (not a browser Basic-auth popup) is how you get back in.
+        assert client.post('/logout').status_code == 200
+        assert client.get('/', follow_redirects=False).headers['location'] == '/login'
+        assert client.get('/login').status_code == 200
+        assert client.post('/login', json={'username': 'admin', 'password': 'wrong'}).status_code == 401
+        login(client, 'longenoughpassword')
+        assert client.get('/').status_code == 200
+
+
+def test_password_rotation_invalidates_existing_sessions(tmp_path):
+    unconfigured = Settings(_env_file=None, database_url=f'sqlite+aiosqlite:///{tmp_path}/rotate.db',
+                             scheduler_enabled=False, sync_on_start=False)
+    with TestClient(create_app(unconfigured)) as client:
+        client.post('/setup', json={'username': 'admin', 'password': 'original-password-123', 'confirm': 'original-password-123'})
+        assert client.get('/').status_code == 200
+        old_session = client.cookies.get('session')
+
+        db = client.app.state.db
+        client.portal.call(lambda: db.update_json('admin_account', password='rotated-password-456'))
+
+        # The cookie from before rotation must no longer authenticate.
+        stale = TestClient(client.app)
+        stale.cookies.set('session', old_session)
+        assert stale.get('/', follow_redirects=False).headers['location'] == '/login'
+        assert stale.get('/api/status').status_code == 401
+
+        # Logging in again with the new password issues a fresh, working session.
+        login(client, 'rotated-password-456')
+        assert client.get('/').status_code == 200
+
+
+async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch):
+    import json as jsonlib
+    from app.services import jellyfin_service
+
+    def handler(request):
+        if request.url.path == '/System/Info':
+            return httpx.Response(200, json={})
+        if request.url.path == '/LiveTv/TunerHosts':
+            data = jsonlib.loads(request.read())
+            return httpx.Response(200, json={**data, 'Id': data.get('Id') or 'tuner-1'})
+        if request.url.path == '/LiveTv/ListingProviders':
+            data = jsonlib.loads(request.read())
+            return httpx.Response(200, json={**data, 'Id': data.get('Id') or 'listing-1'})
+        if request.url.path == '/ScheduledTasks':
+            return httpx.Response(200, json=[{'Name': 'Refresh Guide', 'Key': 'RefreshGuide', 'Id': 'task-1'}])
+        return httpx.Response(204)
+
+    with TestClient(create_app(settings)) as client:
+        client.app.state.client._transport = httpx.MockTransport(handler)
+        login(client, settings.admin_password.get_secret_value())
+        headers = {'X-Pilot-Request': '1'}
+        body = {'url': 'http://jellyfin:8096', 'api_key': 'key-1', 'base_url': 'http://iptv-gtw:8000', 'auto_sync': True}
+        assert client.post('/api/jellyfin', json=body, headers=headers).status_code == 200
+        assert client.get('/api/jellyfin').json()['api_key_set'] is True
+        assert client.post('/api/jellyfin/push', headers=headers).status_code == 200
+        status = client.get('/api/jellyfin').json()
+        assert status['last_push'] and not status['last_error']
+
+        # A blank api_key on save keeps the previously stored key rather than clearing it.
+        assert client.post('/api/jellyfin', json={**body, 'api_key': ''}, headers=headers).status_code == 200
+
+        # A successful background job auto-pushes to Jellyfin because auto_sync is enabled.
+        pushed = []
+        original = jellyfin_service.push
+        async def spy(db, http_client, cfg):
+            pushed.append(True)
+            return await original(db, http_client, cfg)
+        monkeypatch.setattr(jellyfin_service, 'push', spy)
+
+        async def wait_job():
+            await client.app.state.jobs.task
+
+        assert client.post('/api/check', headers=headers).status_code == 202
+        client.portal.call(wait_job)
+        assert pushed
+
+        # Disabling auto_sync stops the background hook from pushing again.
+        pushed.clear()
+        assert client.post('/api/jellyfin', json={**body, 'api_key': '', 'auto_sync': False}, headers=headers).status_code == 200
+        assert client.post('/api/check', headers=headers).status_code == 202
+        client.portal.call(wait_job)
+        assert not pushed
+
+
 def test_number_conflict_and_saved_edit(settings):
     with TestClient(create_app(settings)) as client:
         client.portal.call(seed, client.app.state.db)
-        client.auth = ('admin', settings.admin_password.get_secret_value())
+        login(client, settings.admin_password.get_secret_value())
         headers = {'X-Pilot-Request': '1'}
         assert client.patch('/api/channels/1', json={'channel_number': 2}, headers=headers).status_code == 409
         assert client.patch('/api/channels/1', json={'name': 'Renamed', 'epg_id': 'new.id'}, headers=headers).status_code == 200

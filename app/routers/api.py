@@ -20,14 +20,34 @@ async def status(request: Request):
             'job': request.app.state.jobs.status, 'epg_configured': bool(request.app.state.settings.epg_urls)}
 
 
+async def distinct_values(session, column):
+    return (await session.scalars(select(column).distinct().where(column.is_not(None), column != '').order_by(column))).all()
+
+
+@router.get('/filters')
+async def filters(request: Request):
+    async with request.app.state.db.sessions() as session:
+        countries = await distinct_values(session, Channel.country)
+        languages = await distinct_values(session, Channel.language)
+        groups = await distinct_values(session, Channel.group_title)
+    return {'countries': countries, 'languages': languages, 'groups': groups}
+
+
 @router.get('/channels')
 async def channels(request: Request, q: str = Query('', max_length=300), status: str | None = Query(None, pattern='^(ONLINE|OFFLINE|UNTESTED)$'),
-                   page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=100)):
+                   country: str | None = Query(None, max_length=100), language: str | None = Query(None, max_length=100),
+                   group_title: str | None = Query(None, max_length=100), page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=100)):
     statement = select(Channel)
     if q:
         statement = statement.where(or_(Channel.name.contains(q, autoescape=True), Channel.tvg_id.contains(q, autoescape=True)))
     if status:
         statement = statement.where(Channel.streams.any(Stream.status == status))
+    if country:
+        statement = statement.where(Channel.country == country)
+    if language:
+        statement = statement.where(Channel.language == language)
+    if group_title:
+        statement = statement.where(Channel.group_title == group_title)
     async with request.app.state.db.sessions() as session:
         total = await session.scalar(select(func.count()).select_from(statement.subquery()))
         rows = (await session.scalars(statement.options(selectinload(Channel.streams)).order_by(Channel.channel_number)

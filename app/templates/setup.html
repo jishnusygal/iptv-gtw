@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="referrer" content="no-referrer"><title>Setup · IPTV-Org Pilot</title>
+<link rel="stylesheet" href="/static/pilot.css"><script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script></head>
+<body>
+<div class="auth-page" x-data="{ username: 'admin', password: '', confirm: '', error: '', saving: false,
+  async submit() {
+    this.saving = true; this.error = '';
+    try {
+      const response = await fetch('/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: this.username, password: this.password, confirm: this.confirm }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Check the entered values.');
+      window.location.href = '/';
+    } catch (e) { this.error = e.message; this.saving = false; }
+  } }">
+<div class="auth-wrap">
+<div class="auth-brand"><span class="brand-icon">▤</span> IPTV-Org <strong>Pilot</strong></div>
+<div class="panel auth-card">
+<h1>Create the admin account</h1>
+<p class="muted">{{ host }} · one-time setup</p>
+<form @submit.prevent="submit()">
+<label class="auth-field"><span>Admin username</span><input name="username" autocomplete="username" required maxlength="100" x-model="username"></label>
+<label class="auth-field"><span>Admin password</span><input name="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="200" x-model="password" placeholder="At least 12 characters"></label>
+<label class="auth-field"><span>Confirm password</span><input name="confirm-password" type="password" autocomplete="new-password" required minlength="12" maxlength="200" x-model="confirm"></label>
+<p class="error" role="alert" x-show="error" x-text="error" x-cloak></p>
+<button class="primary auth-submit" type="submit" :disabled="saving" x-text="saving ? 'Creating…' : 'Create admin account'"></button>
+</form>
+</div>
+<p class="auth-footnote">This runs once. A random export token is generated automatically and shown on the dashboard after you sign in. Whoever finishes this first becomes the admin, so don't expose this page to an untrusted network yet.</p>
+</div>
+</div>
+</body></html>

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from app.models import now
+from app.services import jellyfin_service
 from app.services.sync_service import sync
 from app.services.checker_service import check
 
@@ -33,6 +34,8 @@ class Jobs:
             # Do not expose upstream URLs or credentials in logs/status.
             log.error('Background %s failed (%s)', name, type(exc).__name__)
             self.status['error'] = f'{type(exc).__name__}: job failed; retry or verify upstream configuration.'
+        else:
+            await jellyfin_service.push_if_enabled(self.db, self.client, self.settings)
         finally:
             self.status['running'] = False
             self.status['finished_at'] = now().isoformat()

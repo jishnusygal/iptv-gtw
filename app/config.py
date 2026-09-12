@@ -6,9 +6,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
     database_url: str = 'sqlite+aiosqlite:///./data/pilot.db'
     admin_username: str = 'admin'
-    admin_password: SecretStr = Field(min_length=12)
-    export_token: SecretStr = Field(min_length=24)
-    public_base_url: str = 'http://localhost:8000'
+    admin_password: SecretStr | None = Field(default=None, min_length=12)
+    export_token: SecretStr | None = Field(default=None, min_length=24)
     countries: str = 'in,us'
     categories: str = ''
     api_base_url: str = 'https://iptv-org.github.io/api'

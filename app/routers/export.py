@@ -1,19 +1,22 @@
 from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from app.auth import export_auth
+from app.auth import credentials_for, effective_scheme, export_auth
 from app.services.export_service import epg, playlist
 
 router = APIRouter(dependencies=[Depends(export_auth)])
 
 
-def endpoint(settings, path):
-    return settings.public_base_url.rstrip('/') + path + '?' + urlencode({'token': settings.export_token.get_secret_value()})
+async def endpoint(request, path):
+    # A reverse proxy forwards the original Host header unchanged but terminates TLS itself,
+    # so only the scheme (not the host) needs the forwarded header as a fallback source.
+    _, _, token = await credentials_for(request)
+    return f'{effective_scheme(request)}://{request.url.netloc}' + path + '?' + urlencode({'token': token})
 
 
 @router.get('/playlist.m3u')
 async def m3u(request: Request):
     state = request.app.state
-    content = await playlist(state.db, endpoint(state.settings, '/epg.xml'))
+    content = await playlist(state.db, await endpoint(request, '/epg.xml'))
     return Response(content, media_type='audio/x-mpegurl', headers={'Content-Disposition': 'attachment; filename="pilot.m3u"', 'Cache-Control': 'no-store'})
 
 

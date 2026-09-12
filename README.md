@@ -4,22 +4,23 @@ A self-hosted FastAPI gateway and channel curator for iptv-org, with SQLite pers
 
 ## Run locally with Docker
 
-1. Copy `.env.example` to `.env`.
-2. Set `ADMIN_PASSWORD` (at least 12 characters) and `EXPORT_TOKEN` (at least 24 characters) to separate random secrets. `openssl rand -hex 32` generates a suitable value. No default credentials are accepted.
-3. Run `docker compose up -d --build`.
-4. Open `http://localhost:8000` and use the browser's HTTP Basic login with `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+1. Run `docker compose up -d --build` with no `.env` at all, or one that leaves `ADMIN_PASSWORD`/`EXPORT_TOKEN` blank.
+2. Open `http://localhost:8000`. With no admin account configured yet, this redirects to a one-time setup wizard: pick an admin username and password (at least 12 characters); a random export token is generated for you. Whoever reaches `/setup` first becomes the admin, so don't expose the port to an untrusted network before finishing this step.
+3. The wizard signs you straight in. Later visits use the `/login` page (a signed, `HttpOnly` session cookie, not a browser Basic-auth popup); `/logout` clears it. Changing the admin password invalidates any sessions issued under the old one.
+
+Alternatively, skip the wizard entirely by copying `.env.example` to `.env` and setting `ADMIN_PASSWORD` (at least 12 characters) and `EXPORT_TOKEN` (at least 24 characters) to separate random secrets yourself (`openssl rand -hex 32` generates a suitable value) before the first start. Whichever path is used first "wins": once credentials exist (via `.env` or the wizard), `/setup` redirects to the dashboard and cannot be re-run.
 
 The first empty database imports `in,us` channels and checks streams in the background. Failed imports leave the previous database intact; retry from the dashboard. The playlist is empty until streams pass health checks. Every daily sync runs at 03:00 UTC and is followed by a health check; independent checks run every six hours.
 
 ## HTTPS with Traefik and Cloudflare
 
-Set `DOMAIN`, `ACME_EMAIL`, and `CF_DNS_API_TOKEN`; set `PUBLIC_BASE_URL=https://your-domain`. Point DNS at this server, allow ports 80/443, then run:
+Set `DOMAIN`, `ACME_EMAIL`, and `CF_DNS_API_TOKEN`. Point DNS at this server, allow ports 80/443, then run:
 
 ```sh
 docker compose --profile tls up -d --build
 ```
 
-The Cloudflare token needs Zone DNS Edit and Zone Read for the relevant zone. Traefik stores certificates in its named volume. The dashboard uses Basic authentication over TLS. The Docker socket mount gives Traefik sensitive host access; use a restricted Docker socket proxy in hardened environments. Traefik access logging is off to keep export query tokens out of logs. Avoid logging full export URLs in other proxies.
+The Cloudflare token needs Zone DNS Edit and Zone Read for the relevant zone. Traefik stores certificates in its named volume. The dashboard's session cookie is marked `Secure` automatically once requests arrive over HTTPS (via `X-Forwarded-Proto`). The Docker socket mount gives Traefik sensitive host access; use a restricted Docker socket proxy in hardened environments. Traefik access logging is off to keep export query tokens out of logs. Avoid logging full export URLs in other proxies.
 
 ## Configure ingestion and EPG
 
@@ -33,17 +34,29 @@ The importer uses the official [channels, streams, logos and feeds APIs](https:/
 
 Only enabled channels with ONLINE streams appear in either export. The lowest-latency online mirror is chosen deterministically, preserving explicit `tvg-chno` values. A channel's XMLTV override must match the source guide's channel ID. Duplicate programme slots are removed. Stream referrer and user-agent requirements are checked and emitted as VLC options; support varies by TV app.
 
+Playlist and guide URLs use the hostname of the incoming request (via `X-Forwarded-Host`/`X-Forwarded-Proto` when set by a reverse proxy, otherwise the request's own host), so they always match whatever domain or address you actually connected through.
+
+## Jellyfin Live TV integration
+
+From the dashboard's "Connect to Jellyfin" panel, enter Jellyfin's server URL, an admin API key (create one under Jellyfin's Dashboard → API Keys), and the URL this app should tell Jellyfin to use for the playlist/guide (defaults to the current page's origin; use an internal address like `http://iptv-gtw:8000` if both containers share a Docker network, so Jellyfin doesn't depend on a public hostname or TLS). Saving tests the connection; "Push now" registers (or updates in place) an M3U tuner and XMLTV listings provider in Jellyfin and triggers its "Refresh Guide" task immediately. Tick "push automatically" to also push after every sync/check job completes, including the scheduled ones — this drives Jellyfin's Live TV entirely from the dashboard instead of adding the M3U/XMLTV URLs by hand in Jellyfin.
+
 ## API
 
-Admin endpoints require HTTP Basic credentials. Mutations additionally require `X-Pilot-Request: 1` to prevent cross-origin browser form submissions.
+Admin endpoints require a signed-in session cookie (set by `/login`, cleared by `/logout`). Mutations additionally require `X-Pilot-Request: 1` to prevent cross-origin browser form submissions.
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET/POST | `/login` | Sign-in page and session creation |
+| POST | `/logout` | Clear the session cookie |
+| GET/POST | `/setup` | One-time admin account creation when none exists yet (no auth required) |
 | GET | `/api/status` | Counts, last successful sync, current job and EPG configuration |
-| GET | `/api/channels?q=&status=ONLINE&page=1&limit=50` | Paginated channel metadata and stream health |
+| GET | `/api/filters` | Distinct countries, languages and groups present, for dashboard filter dropdowns |
+| GET | `/api/channels?q=&status=ONLINE&country=&language=&group_title=&page=1&limit=50` | Paginated channel metadata and stream health |
 | PATCH | `/api/channels/{id}` | Edit number, name, TV name, group, EPG override, enablement |
 | POST | `/api/sync` | Queue import and check; optional JSON `countries` and `categories` arrays |
 | POST | `/api/check` | Queue all-stream health check |
+| GET/POST | `/api/jellyfin` | Read or save the Jellyfin connection (API key never returned) |
+| POST | `/api/jellyfin/push` | Push the current M3U/XMLTV URLs to Jellyfin now |
 | GET | `/playlist.m3u?token=...` | Player-ready M3U |
 | GET | `/epg.xml?token=...` | Matching XMLTV |
 | GET | `/healthz` | Database readiness without secrets |

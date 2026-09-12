@@ -28,3 +28,38 @@ class ChannelPatch(BaseModel):
 class SyncRequest(BaseModel):
     countries: list[str] | None = None
     categories: list[str] | None = None
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class SetupRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    username: str = Field(default='admin', min_length=1, max_length=100)
+    password: str = Field(min_length=12, max_length=200)
+    confirm: str = Field(min_length=1, max_length=200)
+
+    @field_validator('confirm')
+    @classmethod
+    def match(cls, value, info):
+        if value != info.data.get('password'):
+            raise ValueError('Passwords do not match')
+        return value
+
+
+class JellyfinConfig(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    url: str = Field(min_length=1, max_length=500)
+    api_key: str = Field(default='', max_length=200)
+    base_url: str = Field(min_length=1, max_length=500)
+    auto_sync: bool = False
+
+    @field_validator('url', 'base_url')
+    @classmethod
+    def http_url(cls, value):
+        if not value.strip().lower().startswith(('http://', 'https://')):
+            raise ValueError('Must be an http(s) URL')
+        return value.strip().rstrip('/')
