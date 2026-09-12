@@ -21,7 +21,7 @@
 <form @submit.prevent="submit()">
 <label class="auth-field"><span>Username</span><input name="username" autocomplete="username" required autofocus x-model="username"></label>
 <label class="auth-field"><span>Password</span><input name="password" type="password" autocomplete="current-password" required x-model="password"></label>
-<p class="error" role="alert" x-show="error" x-text="error" x-cloak></p>
+<p class="error" role="alert" x-show="error" x-transition.opacity.duration.150ms x-text="error" x-cloak></p>
 <button class="primary auth-submit" type="submit" :disabled="signing" x-text="signing ? 'Signing in…' : 'Sign in'"></button>
 </form>
 </div>

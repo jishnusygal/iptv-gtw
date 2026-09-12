@@ -22,7 +22,7 @@
 <label class="auth-field"><span>Admin username</span><input name="username" autocomplete="username" required maxlength="100" x-model="username"></label>
 <label class="auth-field"><span>Admin password</span><input name="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="200" x-model="password" placeholder="At least 12 characters"></label>
 <label class="auth-field"><span>Confirm password</span><input name="confirm-password" type="password" autocomplete="new-password" required minlength="12" maxlength="200" x-model="confirm"></label>
-<p class="error" role="alert" x-show="error" x-text="error" x-cloak></p>
+<p class="error" role="alert" x-show="error" x-transition.opacity.duration.150ms x-text="error" x-cloak></p>
 <button class="primary auth-submit" type="submit" :disabled="saving" x-text="saving ? 'Creating…' : 'Create admin account'"></button>
 </form>
 </div>

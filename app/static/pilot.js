@@ -2,7 +2,7 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
   stats: {}, channels: [], total: 0, page: 1, query: '', filter: '', country: '', language: '', group: '',
   filterOptions: { countries: [], languages: [], groups: [] }, message: '', error: '',
   editing: null, draft: {}, saving: false, editError: '', sequence: 0, timer: null,
-  jellyfin: { url: '', apiKey: '', apiKeySet: false, baseUrl: '', autoSync: false, lastPush: null, error: null, saving: false, pushing: false },
+  jellyfin: { url: '', apiKey: '', apiKeySet: false, baseUrl: window.location.origin, autoSync: false, lastPush: null, error: null, saving: false, pushing: false },
   async init() {
     this.loadFilterOptions();
     this.loadJellyfin();
