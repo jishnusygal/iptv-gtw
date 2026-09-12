@@ -12,22 +12,25 @@ class Jobs:
     def __init__(self, db, client, settings):
         self.db, self.client, self.settings = db, client, settings
         self.task = None
-        self.status = {'running': False, 'name': None, 'error': None, 'result': None}
+        self.status = {'running': False, 'name': None, 'error': None, 'result': None, 'progress': None}
 
     def start(self, name, **kwargs):
         if self.task and not self.task.done():
             return False
-        self.status = {'running': True, 'name': name, 'error': None, 'result': None, 'started_at': now().isoformat()}
+        self.status = {'running': True, 'name': name, 'error': None, 'result': None, 'progress': None, 'started_at': now().isoformat()}
         self.task = asyncio.create_task(self.run(name, kwargs))
         return True
+
+    def _report_progress(self, done, total):
+        self.status['progress'] = {'done': done, 'total': total}
 
     async def run(self, name, kwargs):
         try:
             if name == 'sync':
                 self.status['result'] = await sync(self.db, self.client, self.settings, **kwargs)
-                await check(self.db, self.client, self.settings)
+                await check(self.db, self.client, self.settings, on_progress=self._report_progress)
             else:
-                self.status['result'] = await check(self.db, self.client, self.settings)
+                self.status['result'] = await check(self.db, self.client, self.settings, on_progress=self._report_progress)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

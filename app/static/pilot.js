@@ -96,8 +96,11 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
   },
   async pushJellyfin() {
     this.jellyfin.pushing = true; this.jellyfin.error = null;
-    try { await this.request('/api/jellyfin/push', { method: 'POST', body: '{}' }); this.message = 'Pushed to Jellyfin.'; await this.loadJellyfin(); }
-    catch (e) { this.jellyfin.error = e.message; }
+    try {
+      const result = await this.request('/api/jellyfin/push', { method: 'POST', body: '{}' });
+      this.message = result.confirmed ? 'Jellyfin fetched the playlist successfully.' : 'Registered with Jellyfin — its guide refresh is still finishing; check back shortly.';
+      await this.loadJellyfin();
+    } catch (e) { this.jellyfin.error = e.message; }
     finally { this.jellyfin.pushing = false; }
   },
   async logout() {

@@ -64,4 +64,4 @@ async def push(request: Request):
     result = await jellyfin_service.push(request.app.state.db, request.app.state.client, request.app.state.settings)
     if not result['ok']:
         raise HTTPException(502, result['error'])
-    return {'ok': True}
+    return {'ok': True, 'confirmed': result.get('confirmed', False)}

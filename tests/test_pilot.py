@@ -127,8 +127,10 @@ async def test_checker_concurrency_and_persistence(db, settings, monkeypatch):
         return 'ONLINE', 200, 12
     monkeypatch.setattr(checker_service, 'probe', probe)
     settings.check_concurrency = 2
-    await checker_service.check(db, None, settings)
+    progress = []
+    await checker_service.check(db, None, settings, on_progress=lambda done, total: progress.append((done, total)))
     assert peak == 2
+    assert progress == [(3, 3)]
     async with db.sessions() as session:
         assert all(s.last_checked and s.status == 'ONLINE' for s in (await session.scalars(select(Stream))).all())
 
@@ -164,6 +166,18 @@ async def test_job_overlap_and_cleanup(db, settings, monkeypatch):
     await asyncio.sleep(0)
     await jobs.close()
     assert not jobs.status['running']
+
+
+async def test_job_reports_progress(db, settings, monkeypatch):
+    await seed(db)
+    async def probe(*args):
+        return 'ONLINE', 200, 5
+    monkeypatch.setattr(checker_service, 'probe', probe)
+    jobs = Jobs(db, None, settings)
+    assert jobs.status['progress'] is None
+    assert jobs.start('check')
+    await jobs.task
+    assert jobs.status['progress'] == {'done': 3, 'total': 3}
 
 
 async def test_private_destinations_blocked():
@@ -236,6 +250,10 @@ async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch)
     from app.services import jellyfin_service
 
     def handler(request):
+        # Regression guard: Jellyfin's X-MediaBrowser-Token/X-Emby-Token headers only work
+        # when "legacy authorization" is enabled server-side (off by default); the ?ApiKey=
+        # query param is unconditional, so that's what must actually be sent.
+        assert request.url.params.get('ApiKey') == 'key-1', f'missing ApiKey query param on {request.url.path}'
         if request.url.path == '/System/Info':
             return httpx.Response(200, json={})
         if request.url.path == '/LiveTv/TunerHosts':
@@ -246,6 +264,8 @@ async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch)
             return httpx.Response(200, json={**data, 'Id': data.get('Id') or 'listing-1'})
         if request.url.path == '/ScheduledTasks':
             return httpx.Response(200, json=[{'Name': 'Refresh Guide', 'Key': 'RefreshGuide', 'Id': 'task-1'}])
+        if request.url.path == '/ScheduledTasks/task-1':
+            return httpx.Response(200, json={'State': 'Idle', 'LastExecutionResult': {'Status': 'Completed', 'ErrorMessage': None}})
         return httpx.Response(204)
 
     with TestClient(create_app(settings)) as client:
@@ -283,6 +303,39 @@ async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch)
         assert client.post('/api/check', headers=headers).status_code == 202
         client.portal.call(wait_job)
         assert not pushed
+
+
+async def test_jellyfin_push_reports_failed_guide_refresh(settings):
+    import json as jsonlib
+
+    def handler(request):
+        if request.url.path == '/System/Info':
+            return httpx.Response(200, json={})
+        if request.url.path == '/LiveTv/TunerHosts':
+            data = jsonlib.loads(request.read())
+            return httpx.Response(200, json={**data, 'Id': data.get('Id') or 'tuner-1'})
+        if request.url.path == '/LiveTv/ListingProviders':
+            data = jsonlib.loads(request.read())
+            return httpx.Response(200, json={**data, 'Id': data.get('Id') or 'listing-1'})
+        if request.url.path == '/ScheduledTasks':
+            return httpx.Response(200, json=[{'Name': 'Refresh Guide', 'Key': 'RefreshGuide', 'Id': 'task-1'}])
+        if request.url.path == '/ScheduledTasks/task-1':
+            # Jellyfin accepted the tuner registration, but its own fetch back from us failed
+            # (e.g. "This app's URL" isn't reachable from Jellyfin's side of the network).
+            return httpx.Response(200, json={'State': 'Idle', 'LastExecutionResult': {'Status': 'Failed', 'ErrorMessage': 'Connection refused'}})
+        return httpx.Response(204)
+
+    with TestClient(create_app(settings)) as client:
+        client.app.state.client._transport = httpx.MockTransport(handler)
+        login(client, settings.admin_password.get_secret_value())
+        headers = {'X-Pilot-Request': '1'}
+        body = {'url': 'http://jellyfin:8096', 'api_key': 'key-1', 'base_url': 'http://unreachable-host:8000', 'auto_sync': False}
+        assert client.post('/api/jellyfin', json=body, headers=headers).status_code == 200
+        response = client.post('/api/jellyfin/push', headers=headers)
+        assert response.status_code == 502
+        assert 'could not fetch the playlist' in response.json()['detail']
+        status = client.get('/api/jellyfin').json()
+        assert 'could not fetch the playlist' in status['last_error']
 
 
 def test_jellyfin_url_defaults_detected_and_editable(settings):

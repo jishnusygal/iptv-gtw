@@ -35,10 +35,11 @@ async def probe(client, stream, timeout):
     return 'OFFLINE', code, int((time.monotonic() - started) * 1000)
 
 
-async def check(db, client, settings):
+async def check(db, client, settings, on_progress=None):
     semaphore = asyncio.Semaphore(settings.check_concurrency)
     async with db.sessions() as session:
         streams = (await session.scalars(select(Stream))).all()
+    total = len(streams)
 
     async def one(stream):
         async with semaphore:
@@ -46,8 +47,10 @@ async def check(db, client, settings):
             return {'id': stream.id, 'status': status, 'http_status': code, 'latency_ms': latency, 'last_checked': now()}
 
     # Bound pending tasks as well as sockets, and persist progress in batches.
-    for start in range(0, len(streams), 200):
+    for start in range(0, total, 200):
         results = await asyncio.gather(*(one(s) for s in streams[start:start + 200]))
         async with db.sessions.begin() as session:
             await session.execute(update(Stream), results)
-    return {'streams_checked': len(streams)}
+        if on_progress:
+            on_progress(min(start + 200, total), total)
+    return {'streams_checked': total}
