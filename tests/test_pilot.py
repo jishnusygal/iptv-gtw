@@ -285,6 +285,22 @@ async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch)
         assert not pushed
 
 
+def test_multi_language_filter(settings):
+    with TestClient(create_app(settings)) as client:
+        async def seed_languages(db):
+            async with db.sessions.begin() as session:
+                session.add_all([Channel(channel_number=1, name='Eng', tvg_id='eng.1', language='eng'),
+                                  Channel(channel_number=2, name='Hin', tvg_id='hin.1', language='hin'),
+                                  Channel(channel_number=3, name='Spa', tvg_id='spa.1', language='spa')])
+        client.portal.call(seed_languages, client.app.state.db)
+        login(client, settings.admin_password.get_secret_value())
+        assert client.get('/api/filters').json()['languages'] == ['eng', 'hin', 'spa']
+        assert client.get('/api/channels', params={'language': 'eng'}).json()['total'] == 1
+        data = client.get('/api/channels', params=[('language', 'eng'), ('language', 'hin')]).json()
+        assert data['total'] == 2
+        assert {c['name'] for c in data['items']} == {'Eng', 'Hin'}
+
+
 def test_number_conflict_and_saved_edit(settings):
     with TestClient(create_app(settings)) as client:
         client.portal.call(seed, client.app.state.db)

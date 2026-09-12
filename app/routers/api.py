@@ -35,7 +35,7 @@ async def filters(request: Request):
 
 @router.get('/channels')
 async def channels(request: Request, q: str = Query('', max_length=300), status: str | None = Query(None, pattern='^(ONLINE|OFFLINE|UNTESTED)$'),
-                   country: str | None = Query(None, max_length=100), language: str | None = Query(None, max_length=100),
+                   country: str | None = Query(None, max_length=100), language: list[str] = Query(default=[]),
                    group_title: str | None = Query(None, max_length=100), page: int = Query(1, ge=1), limit: int = Query(50, ge=1, le=100)):
     statement = select(Channel)
     if q:
@@ -45,7 +45,7 @@ async def channels(request: Request, q: str = Query('', max_length=300), status:
     if country:
         statement = statement.where(Channel.country == country)
     if language:
-        statement = statement.where(Channel.language == language)
+        statement = statement.where(Channel.language.in_(language))
     if group_title:
         statement = statement.where(Channel.group_title == group_title)
     async with request.app.state.db.sessions() as session:

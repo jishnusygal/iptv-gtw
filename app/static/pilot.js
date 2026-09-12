@@ -1,5 +1,5 @@
 document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
-  stats: {}, channels: [], total: 0, page: 1, query: '', filter: '', country: '', language: '', group: '',
+  stats: {}, channels: [], total: 0, page: 1, query: '', filter: '', country: '', language: [], group: '',
   filterOptions: { countries: [], languages: [], groups: [] }, message: '', error: '',
   editing: null, draft: {}, saving: false, editError: '', sequence: 0, timer: null,
   jellyfin: { url: '', apiKey: '', apiKeySet: false, baseUrl: window.location.origin, autoSync: false, lastPush: null, error: null, saving: false, pushing: false },
@@ -28,14 +28,20 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
       if (wasRunning && !stats.job?.running) this.loadFilterOptions();
     } catch (e) { this.error = e.message; }
   },
-  hasFilters() { return !!(this.query || this.filter || this.country || this.language || this.group); },
+  hasFilters() { return !!(this.query || this.filter || this.country || this.language.length || this.group); },
+  toggleLanguage(l) {
+    const i = this.language.indexOf(l);
+    if (i === -1) this.language.push(l); else this.language.splice(i, 1);
+    this.page = 1; this.load();
+  },
   async load() {
     const seq = ++this.sequence;
     try {
       const params = new URLSearchParams({ q: this.query, page: this.page });
-      for (const [key, value] of Object.entries({ status: this.filter, country: this.country, language: this.language, group_title: this.group })) {
+      for (const [key, value] of Object.entries({ status: this.filter, country: this.country, group_title: this.group })) {
         if (value) params.set(key, value);
       }
+      for (const l of this.language) params.append('language', l);
       const data = await this.request('/api/channels?' + params);
       if (seq !== this.sequence) return;
       this.channels = data.items; this.total = data.total; this.error = '';

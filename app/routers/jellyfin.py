@@ -1,8 +1,11 @@
+import logging
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from app.auth import admin
 from app.schemas import JellyfinConfig
 from app.services import jellyfin_service
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix='/api/jellyfin', dependencies=[Depends(admin)])
 
 
@@ -21,8 +24,13 @@ async def save(body: JellyfinConfig, request: Request):
         raise HTTPException(422, 'An API key is required')
     try:
         await jellyfin_service.test_connection(request.app.state.client, body.url, api_key)
-    except Exception:
-        raise HTTPException(400, 'Could not reach Jellyfin with that URL and API key') from None
+    except httpx.HTTPStatusError as exc:
+        log.error('Jellyfin connection test to %s was rejected (HTTP %s)', body.url, exc.response.status_code)
+        raise HTTPException(400, f'Jellyfin at {body.url} responded with HTTP {exc.response.status_code} — check the API key.') from None
+    except Exception as exc:
+        log.error('Jellyfin connection test to %s failed (%s)', body.url, type(exc).__name__)
+        raise HTTPException(400, f'Could not reach Jellyfin at {body.url} ({type(exc).__name__}). '
+                                  'Check the URL and that this container can reach it on the network.') from None
     changes = {'url': body.url, 'api_key': api_key, 'base_url': body.base_url, 'auto_sync': body.auto_sync}
     if body.url != existing.get('url'):
         changes['tuner_id'] = None

@@ -1,5 +1,6 @@
 import logging
 from urllib.parse import urlencode
+import httpx
 from app.auth import resolve_credentials
 from app.models import now
 
@@ -49,9 +50,14 @@ async def push(db, client, settings):
     try:
         tuner_id, listing_id = await _register(client, config['url'], config['api_key'], m3u_url, epg_url,
                                                 config.get('tuner_id'), config.get('listing_id'))
+    except httpx.HTTPStatusError as exc:
+        log.error('Jellyfin push to %s was rejected (HTTP %s)', config['url'], exc.response.status_code)
+        error = f'Jellyfin at {config["url"]} responded with HTTP {exc.response.status_code} — check the API key.'
+        await db.update_json('jellyfin', last_error=error)
+        return {'ok': False, 'error': error}
     except Exception as exc:
-        log.error('Jellyfin push failed (%s)', type(exc).__name__)
-        error = f'{type(exc).__name__}: could not reach or update Jellyfin.'
+        log.error('Jellyfin push to %s failed (%s)', config['url'], type(exc).__name__)
+        error = f'Could not reach Jellyfin at {config["url"]} ({type(exc).__name__}).'
         await db.update_json('jellyfin', last_error=error)
         return {'ok': False, 'error': error}
     changes = {'last_push': now().isoformat(), 'last_error': ''}
