@@ -83,3 +83,7 @@ Outbound requests reject non-HTTP schemes, credential-bearing URLs, private/rese
 ## Project layout
 
 `app/models.py` and `database.py` define persistence; `services/` holds ingestion, health checks, exports and job coordination; `routers/` exposes the protected API, dashboard and player endpoints. `tests/test_pilot.py` exercises integration and failure paths without live upstream dependencies.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, running tests/lint, and the PR process.
