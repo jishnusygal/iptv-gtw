@@ -245,6 +245,56 @@ def test_password_rotation_invalidates_existing_sessions(tmp_path):
         assert client.get('/').status_code == 200
 
 
+def test_account_locked_when_set_via_env(settings):
+    with TestClient(create_app(settings)) as client:
+        login(client, settings.admin_password.get_secret_value())
+        assert client.get('/api/account').json() == {'username': 'admin', 'password_locked': True, 'export_token_locked': True}
+        headers = {'X-Pilot-Request': '1'}
+        body = {'current_password': settings.admin_password.get_secret_value(), 'new_password': 'a-new-long-password', 'confirm': 'a-new-long-password'}
+        assert client.post('/api/account/password', json=body, headers=headers).status_code == 409
+        assert client.post('/api/account/export-token', headers=headers).status_code == 409
+
+
+def test_account_password_change_and_token_regeneration(tmp_path):
+    unconfigured = Settings(_env_file=None, database_url=f'sqlite+aiosqlite:///{tmp_path}/account.db',
+                             scheduler_enabled=False, sync_on_start=False)
+    with TestClient(create_app(unconfigured)) as client:
+        client.post('/setup', json={'username': 'admin', 'password': 'original-password-123', 'confirm': 'original-password-123'})
+        headers = {'X-Pilot-Request': '1'}
+        old_session = client.cookies.get('session')
+        assert client.get('/api/account').json() == {'username': 'admin', 'password_locked': False, 'export_token_locked': False}
+
+        wrong = {'current_password': 'wrong', 'new_password': 'a-new-long-password', 'confirm': 'a-new-long-password'}
+        assert client.post('/api/account/password', json=wrong, headers=headers).status_code == 401
+        mismatched = {'current_password': 'original-password-123', 'new_password': 'a-new-long-password', 'confirm': 'nope'}
+        assert client.post('/api/account/password', json=mismatched, headers=headers).status_code == 422
+
+        # A correct change keeps this session working (no forced re-login)...
+        correct = {'current_password': 'original-password-123', 'new_password': 'a-new-long-password', 'confirm': 'a-new-long-password'}
+        assert client.post('/api/account/password', json=correct, headers=headers).status_code == 200
+        assert client.get('/api/status').status_code == 200
+        assert client.cookies.get('session') != old_session
+
+        # ...but invalidates any other session issued under the old password.
+        stale = TestClient(client.app)
+        stale.cookies.set('session', old_session)
+        assert stale.get('/api/status').status_code == 401
+
+        # The old password no longer logs in; the new one does.
+        fresh = TestClient(client.app)
+        assert fresh.post('/login', json={'username': 'admin', 'password': 'original-password-123'}).status_code == 401
+        login(fresh, 'a-new-long-password')
+
+        # Regenerating the export token invalidates the old one immediately.
+        old_token = client.get('/').text.split('token=')[1].split('"')[0]
+        assert client.get('/playlist.m3u', params={'token': old_token}).status_code == 200
+        assert client.post('/api/account/export-token', headers=headers).status_code == 200
+        assert client.get('/playlist.m3u', params={'token': old_token}).status_code == 401
+        new_token = client.get('/').text.split('token=')[1].split('"')[0]
+        assert new_token != old_token
+        assert client.get('/playlist.m3u', params={'token': new_token}).status_code == 200
+
+
 async def test_jellyfin_save_push_reuse_key_and_auto_sync(settings, monkeypatch):
     import json as jsonlib
     from app.services import jellyfin_service

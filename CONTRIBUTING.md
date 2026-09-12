@@ -57,6 +57,8 @@ Commits in this repo follow [Conventional Commits](https://www.conventionalcommi
 3. Before opening a PR, make sure `pytest` and `ruff check .` both pass locally (there is no CI configured yet to catch this automatically).
 4. Fill out the pull request template.
 
+`main` is protected: direct pushes aren't allowed, and every pull request needs an approving review from a code owner (see `.github/CODEOWNERS`) before it can merge.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under this project's [MIT License](LICENSE).

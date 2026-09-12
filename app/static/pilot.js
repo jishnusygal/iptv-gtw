@@ -5,6 +5,8 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
   jellyfin: { url: '', urlDetected: false, apiKey: '', apiKeySet: false, baseUrl: '', baseUrlDetected: false, autoSync: false, lastPush: null, error: null, saving: false, pushing: false },
   profiles: [], selected: new Set(), editingProfileId: null,
   profileDialog: { name: '', saving: false, error: '' },
+  account: { username: '', passwordLocked: false, exportTokenLocked: false, currentPassword: '', newPassword: '',
+    confirm: '', savingPassword: false, passwordError: '', regeneratingToken: false, tokenError: '' },
   async init() {
     this.loadFilterOptions();
     this.loadJellyfin();
@@ -127,6 +129,35 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
       if (this.editingProfileId === p.id) this.cancelProfileEdit();
       this.message = 'Profile deleted.'; await this.loadProfiles();
     } catch (e) { this.error = e.message; }
+  },
+  resetAccountDialog() {
+    this.account = { ...this.account, currentPassword: '', newPassword: '', confirm: '', passwordError: '', tokenError: '' };
+  },
+  async openAccountDialog() {
+    this.resetAccountDialog();
+    try {
+      const data = await this.request('/api/account');
+      this.account = { ...this.account, username: data.username, passwordLocked: data.password_locked, exportTokenLocked: data.export_token_locked };
+    } catch (e) { this.error = e.message; return; }
+    this.$refs.accountEditor.showModal();
+  },
+  async changePassword() {
+    this.account.savingPassword = true; this.account.passwordError = '';
+    try {
+      await this.request('/api/account/password', { method: 'POST', body: JSON.stringify({
+        current_password: this.account.currentPassword, new_password: this.account.newPassword, confirm: this.account.confirm }) });
+      this.message = 'Password changed.';
+      this.account = { ...this.account, currentPassword: '', newPassword: '', confirm: '' };
+    } catch (e) { this.account.passwordError = e.message; }
+    finally { this.account.savingPassword = false; }
+  },
+  async regenerateExportToken() {
+    if (!confirm('Regenerate the export token? Existing playlist and guide links will stop working until updated.')) return;
+    this.account.regeneratingToken = true; this.account.tokenError = '';
+    try {
+      await this.request('/api/account/export-token', { method: 'POST', body: '{}' });
+      window.location.reload();
+    } catch (e) { this.account.tokenError = e.message; this.account.regeneratingToken = false; }
   },
   async loadJellyfin() {
     try {
