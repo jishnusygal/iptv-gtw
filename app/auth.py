@@ -3,6 +3,8 @@ import hmac
 import secrets
 import time
 from fastapi import HTTPException, Request
+from sqlalchemy.orm import selectinload
+from app.models import Profile
 
 SESSION_COOKIE = 'session'
 SESSION_MAX_AGE = 60 * 60 * 24 * 30  # 30 days; re-login is cheap for a single-admin tool
@@ -121,3 +123,22 @@ async def export_auth(request: Request, token: str = ''):
         raise HTTPException(503, 'Setup required; create the admin account first')
     if not secrets.compare_digest(token.encode(), export_token.encode()):
         raise HTTPException(401, 'Valid export token required')
+
+
+async def get_profile(session, profile_id, *, with_channels=False):
+    options = [selectinload(Profile.channels)] if with_channels else []
+    profile = await session.get(Profile, profile_id, options=options)
+    if profile is None:
+        raise HTTPException(404, 'Profile not found')
+    return profile
+
+
+async def profile_export_auth(request: Request, profile_id: int, token: str = ''):
+    # Each profile carries its own token (unlike the single shared EXPORT_TOKEN above),
+    # so a leaked profile link only exposes that profile's channel subset. channels is
+    # eager-loaded since the session closes before the route handler reads it.
+    async with request.app.state.db.sessions() as session:
+        profile = await get_profile(session, profile_id, with_channels=True)
+    if not secrets.compare_digest(token.encode(), profile.token.encode()):
+        raise HTTPException(401, 'Valid profile token required')
+    request.state.profile = profile

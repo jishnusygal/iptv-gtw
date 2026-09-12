@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Table, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -49,3 +49,19 @@ class State(Base):
     __tablename__ = 'state'
     key: Mapped[str] = mapped_column(primary_key=True)
     value: Mapped[str]
+
+
+profile_channels = Table(
+    'profile_channels', Base.metadata,
+    Column('profile_id', ForeignKey('profiles.id', ondelete='CASCADE'), primary_key=True),
+    Column('channel_id', ForeignKey('channels.id', ondelete='CASCADE'), primary_key=True, index=True),
+)
+
+
+class Profile(Base):
+    __tablename__ = 'profiles'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    channels: Mapped[list['Channel']] = relationship(secondary=profile_channels)

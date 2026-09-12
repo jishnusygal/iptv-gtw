@@ -14,17 +14,19 @@ def clean(value):
     return ''.join(c for c in str(value or '') if ord(c) >= 32).replace('"', "'")
 
 
-async def active_channels(db):
+async def active_channels(db, channel_ids=None):
+    statement = select(Channel).where(Channel.is_enabled.is_(True))
+    if channel_ids is not None:
+        statement = statement.where(Channel.id.in_(channel_ids))
     async with db.sessions() as session:
-        channels = (await session.scalars(select(Channel).where(Channel.is_enabled.is_(True))
-                    .options(selectinload(Channel.streams)).order_by(Channel.channel_number))).all()
+        channels = (await session.scalars(statement.options(selectinload(Channel.streams)).order_by(Channel.channel_number))).all()
     return [(c, min((s for s in c.streams if s.status == 'ONLINE'), key=lambda s: (s.latency_ms if s.latency_ms is not None else 999999, s.id)))
             for c in channels if any(s.status == 'ONLINE' for s in c.streams)]
 
 
-async def playlist(db, guide_url):
+async def playlist(db, guide_url, channel_ids=None):
     lines = [f'#EXTM3U x-tvg-url="{clean(guide_url)}"']
-    for c, s in await active_channels(db):
+    for c, s in await active_channels(db, channel_ids):
         attrs = {'tvg-id': c.epg_id or c.tvg_id, 'tvg-name': c.tvg_name or c.name,
                  'tvg-logo': c.logo_url, 'tvg-chno': c.channel_number, 'group-title': c.group_title}
         lines.append('#EXTINF:-1 ' + ' '.join(f'{k}="{clean(v)}"' for k, v in attrs.items()) + ',' + clean(c.name))
@@ -63,10 +65,10 @@ class GuideCache:
             return documents
 
 
-async def epg(db, documents):
+async def epg(db, documents, channel_ids=None):
     root = ET.Element('tv', {'generator-info-name': 'IPTV-Org Pilot'})
     ids = set()
-    for channel, _ in await active_channels(db):
+    for channel, _ in await active_channels(db, channel_ids):
         key = channel.epg_id or channel.tvg_id
         if key in ids:
             continue

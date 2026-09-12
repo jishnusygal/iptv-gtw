@@ -371,6 +371,45 @@ def test_multi_language_filter(settings):
         assert {c['name'] for c in data['items']} == {'Eng', 'Hin'}
 
 
+def test_profiles_crud_export_and_auth(settings):
+    with TestClient(create_app(settings)) as client:
+        client.portal.call(seed, client.app.state.db)
+        login(client, settings.admin_password.get_secret_value())
+        headers = {'X-Pilot-Request': '1'}
+
+        assert client.post('/api/profiles', json={'name': 'News', 'channel_ids': [999]}, headers=headers).status_code == 422
+        created = client.post('/api/profiles', json={'name': 'News', 'channel_ids': [1]}, headers=headers)
+        assert created.status_code == 201
+        profile = created.json()
+        assert profile['channel_ids'] == [1]
+        assert 'playlist_url' in profile and 'epg_url' in profile
+
+        # A second profile with the same name is rejected.
+        assert client.post('/api/profiles', json={'name': 'News', 'channel_ids': [1]}, headers=headers).status_code == 409
+
+        # The filtered export only contains the profile's channels (still best-mirror, still ONLINE-only).
+        token = profile['playlist_url'].split('token=')[-1]
+        m3u = client.get(f'/profiles/{profile["id"]}/playlist.m3u', params={'token': token})
+        assert m3u.status_code == 200 and m3u.text.count('#EXTINF:') == 1 and 'fast' in m3u.text
+        xml = client.get(f'/profiles/{profile["id"]}/epg.xml', params={'token': token})
+        assert xml.status_code == 200 and ET.fromstring(xml.content).tag == 'tv'
+
+        # Each profile's token is independent of the global export token and of other profiles.
+        assert client.get(f'/profiles/{profile["id"]}/playlist.m3u', params={'token': 'wrong'}).status_code == 401
+        assert client.get(f'/profiles/{profile["id"]}/playlist.m3u').status_code == 401
+        assert client.get('/profiles/999999/playlist.m3u', params={'token': token}).status_code == 404
+
+        # PATCH fully replaces the name and channel selection.
+        updated = client.patch(f'/api/profiles/{profile["id"]}', json={'name': 'Renamed', 'channel_ids': [1, 2]}, headers=headers)
+        assert updated.status_code == 200
+        assert updated.json()['name'] == 'Renamed' and sorted(updated.json()['channel_ids']) == [1, 2]
+
+        # Deleting revokes the profile's links immediately.
+        assert client.delete(f'/api/profiles/{profile["id"]}', headers=headers).status_code == 200
+        assert client.get('/api/profiles').json() == []
+        assert client.get(f'/profiles/{profile["id"]}/playlist.m3u', params={'token': token}).status_code == 404
+
+
 def test_number_conflict_and_saved_edit(settings):
     with TestClient(create_app(settings)) as client:
         client.portal.call(seed, client.app.state.db)

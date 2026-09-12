@@ -14,4 +14,5 @@ async def index(request: Request):
     return templates.TemplateResponse(request=request, name='index.html', context={
         'playlist_url': await endpoint(request, '/playlist.m3u'), 'epg_url': await endpoint(request, '/epg.xml'),
         'countries': settings.countries, 'categories': settings.categories,
-        'sync_interval_hours': settings.sync_interval_hours}, headers={'Cache-Control': 'no-store'})
+        'sync_interval_hours': settings.sync_interval_hours,
+        'health_interval_hours': settings.health_interval_hours}, headers={'Cache-Control': 'no-store'})

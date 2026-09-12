@@ -1,6 +1,12 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+def clean_text(value):
+    if not value.strip() or any(ord(c) < 32 for c in value):
+        raise ValueError('Use non-empty text without control characters')
+    return value.strip()
+
+
 class ChannelPatch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     channel_number: int | None = Field(default=None, ge=1, le=1000000)
@@ -13,9 +19,7 @@ class ChannelPatch(BaseModel):
     @field_validator('name', 'group_title', 'tvg_name', 'epg_id')
     @classmethod
     def clean(cls, value):
-        if value is not None and (not value.strip() or any(ord(c) < 32 for c in value)):
-            raise ValueError('Use non-empty text without control characters')
-        return value.strip() if value else value
+        return clean_text(value) if value is not None else value
 
     @field_validator('channel_number', 'name', 'group_title', 'is_enabled')
     @classmethod
@@ -48,6 +52,17 @@ class SetupRequest(BaseModel):
         if value != info.data.get('password'):
             raise ValueError('Passwords do not match')
         return value
+
+
+class ProfileWrite(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=1, max_length=100)
+    channel_ids: list[int] = Field(min_length=1)
+
+    @field_validator('name')
+    @classmethod
+    def clean(cls, value):
+        return clean_text(value)
 
 
 class JellyfinConfig(BaseModel):

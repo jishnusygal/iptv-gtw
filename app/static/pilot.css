@@ -38,3 +38,14 @@
 .auth-footnote{text-align:center;font-size:12px;color:var(--muted);margin-top:22px;line-height:1.6;animation:auth-rise 360ms cubic-bezier(0,0,.2,1) both;animation-delay:80ms}
 @keyframes auth-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){.auth-brand,.auth-card,.auth-footnote{animation:none}.auth-field input,button,.button{transition:none}}
+
+th.select,td.select{width:1%;padding-inline-end:8px}
+th.select input,td.select input{width:auto;min-height:auto;padding:0}
+.profile-list{display:flex;flex-direction:column;gap:16px}
+.profile-row{padding-bottom:16px;border-bottom:1px solid var(--border)}
+.profile-row:last-child{border-bottom:0;padding-bottom:0}
+.profile-row-head{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+.profile-row-head .actions{margin-left:auto}
+.profile-row>div{display:flex;gap:8px;margin:6px 0;align-items:center}
+.profile-row input{width:100%;min-width:0;font-size:12px;font-family:monospace}
+.profile-row>div button{flex-shrink:0;white-space:nowrap}

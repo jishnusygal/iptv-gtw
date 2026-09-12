@@ -3,9 +3,12 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
   filterOptions: { countries: [], languages: [], groups: [] }, message: '', error: '',
   editing: null, draft: {}, saving: false, editError: '', sequence: 0, timer: null,
   jellyfin: { url: '', urlDetected: false, apiKey: '', apiKeySet: false, baseUrl: '', baseUrlDetected: false, autoSync: false, lastPush: null, error: null, saving: false, pushing: false },
+  profiles: [], selected: new Set(), editingProfileId: null,
+  profileDialog: { name: '', saving: false, error: '' },
   async init() {
     this.loadFilterOptions();
     this.loadJellyfin();
+    this.loadProfiles();
     await this.refresh();
     this.timer = setInterval(() => this.refresh(), 5000);
   },
@@ -77,6 +80,53 @@ document.addEventListener('alpine:init', () => Alpine.data('pilot', () => ({
     const input = document.getElementById(id);
     try { await navigator.clipboard.writeText(input.value); this.message = 'Endpoint copied.'; }
     catch { input.select(); this.message = 'Select and copy the endpoint from the field.'; }
+  },
+  toggleSelect(id) {
+    if (this.selected.has(id)) this.selected.delete(id); else this.selected.add(id);
+  },
+  allVisibleSelected() {
+    return this.channels.length > 0 && this.channels.every(c => this.selected.has(c.id));
+  },
+  toggleSelectAllVisible() {
+    if (this.allVisibleSelected()) this.channels.forEach(c => this.selected.delete(c.id));
+    else this.channels.forEach(c => this.selected.add(c.id));
+  },
+  async loadProfiles() {
+    try { this.profiles = await this.request('/api/profiles'); }
+    catch (e) { this.error = e.message; }
+  },
+  openProfileDialog() {
+    if (!this.selected.size) { this.error = 'Select at least one channel first.'; return; }
+    this.profileDialog = { name: this.editingProfileId ? this.profileDialog.name : '', saving: false, error: '' };
+    this.$refs.profileEditor.showModal();
+  },
+  editProfile(p) {
+    this.editingProfileId = p.id;
+    this.selected = new Set(p.channel_ids);
+    this.profileDialog = { name: p.name, saving: false, error: '' };
+    this.$refs.profileEditor.showModal();
+  },
+  cancelProfileEdit() {
+    this.editingProfileId = null; this.selected = new Set();
+  },
+  async saveProfile() {
+    this.profileDialog.saving = true;
+    try {
+      const body = JSON.stringify({ name: this.profileDialog.name, channel_ids: Array.from(this.selected) });
+      if (this.editingProfileId) await this.request('/api/profiles/' + this.editingProfileId, { method: 'PATCH', body });
+      else await this.request('/api/profiles', { method: 'POST', body });
+      this.$refs.profileEditor.close(); this.message = 'Profile saved.';
+      await this.loadProfiles();
+    } catch (e) { this.profileDialog.error = e.message; }
+    finally { this.profileDialog.saving = false; }
+  },
+  async deleteProfile(p) {
+    if (!confirm(`Delete profile "${p.name}"? Its playlist and guide links will stop working.`)) return;
+    try {
+      await this.request('/api/profiles/' + p.id, { method: 'DELETE' });
+      if (this.editingProfileId === p.id) this.cancelProfileEdit();
+      this.message = 'Profile deleted.'; await this.loadProfiles();
+    } catch (e) { this.error = e.message; }
   },
   async loadJellyfin() {
     try {
