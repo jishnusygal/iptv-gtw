@@ -31,7 +31,7 @@ def create_app(settings=None):
                 jobs.start(name)
 
             if config.scheduler_enabled:
-                scheduler.add_job(scheduled, 'cron', hour=3, minute=0, args=['sync'], max_instances=1, coalesce=True)
+                scheduler.add_job(scheduled, 'interval', hours=config.sync_interval_hours, args=['sync'], max_instances=1, coalesce=True)
                 scheduler.add_job(scheduled, 'interval', hours=config.health_interval_hours, args=['check'], max_instances=1, coalesce=True)
                 scheduler.start()
             async with db.sessions() as session:

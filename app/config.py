@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     epg_urls: str = ''
     sync_on_start: bool = True
     scheduler_enabled: bool = True
+    sync_interval_hours: int = Field(default=24, ge=1)
     health_interval_hours: int = Field(default=6, ge=1)
     check_timeout: float = Field(default=5, gt=0, le=30)
     check_concurrency: int = Field(default=20, ge=1, le=100)

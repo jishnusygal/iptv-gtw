@@ -10,7 +10,7 @@ A self-hosted FastAPI gateway and channel curator for iptv-org, with SQLite pers
 
 Alternatively, skip the wizard entirely by copying `.env.example` to `.env` and setting `ADMIN_PASSWORD` (at least 12 characters) and `EXPORT_TOKEN` (at least 24 characters) to separate random secrets yourself (`openssl rand -hex 32` generates a suitable value) before the first start. Whichever path is used first "wins": once credentials exist (via `.env` or the wizard), `/setup` redirects to the dashboard and cannot be re-run.
 
-The first empty database imports `in,us` channels and checks streams in the background. Failed imports leave the previous database intact; retry from the dashboard. The playlist is empty until streams pass health checks. Every daily sync runs at 03:00 UTC and is followed by a health check; independent checks run every six hours.
+The first empty database imports `in,us` channels and checks streams in the background. Failed imports leave the previous database intact; retry from the dashboard. The playlist is empty until streams pass health checks. Sync runs on a fixed interval (`SYNC_INTERVAL_HOURS`, default 24) starting from process startup, not a fixed clock time, and is followed by a health check; independent checks run on their own interval (`HEALTH_INTERVAL_HOURS`, default 6).
 
 ## HTTPS with Traefik and Cloudflare
 
@@ -28,6 +28,7 @@ The Cloudflare token needs Zone DNS Edit and Zone Read for the relevant zone. Tr
 - `CATEGORIES=news,sports`: category allowlist. Blank means all. Country and category filters intersect.
 - `EPG_URLS=https://your-guide-host/guide.xml`: comma-separated public HTTP(S) XMLTV or gzip XMLTV sources. Run the upstream [iptv-org EPG generator](https://github.com/iptv-org/epg) separately if you need to generate guides. No guide subscription or fabricated programme data is included.
 - `CHECK_CONCURRENCY=20`, `CHECK_TIMEOUT=5`, `HEALTH_INTERVAL_HOURS=6` control checking.
+- `SYNC_INTERVAL_HOURS=24` controls how often the full upstream sync (new/removed channels, not just stream health) repeats. Set it to `3` for a sync every three hours, for example.
 - `MAX_DOWNLOAD_BYTES=67108864` bounds each upstream document, including decompressed XMLTV. Guides cache for one hour. Source errors return HTTP 502; without sources, `/epg.xml` is a valid channel-only guide.
 
 The importer uses the official [channels, streams, logos and feeds APIs](https://github.com/iptv-org/api). Canonical IDs are authoritative. Streams without IDs attach by unambiguous normalized names, removing quality labels. With no filters, unmatched titles receive deterministic synthetic IDs. Conflicting canonical IDs are never merged by name. Duplicate URLs per channel collapse into one mirror. Existing numbers, names, group names, enablement, and EPG overrides survive synchronization. Removed upstream mirrors are deleted; channel records remain for curation. Changing filters replaces the active imported mirror set, not a cumulative union. New channels get the next unused number after the maximum; editing to an occupied number returns 409.
